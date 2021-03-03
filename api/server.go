@@ -165,6 +165,7 @@ func (s *ApiServer) collectMinerCharts(login string, hash int64, largeHash int64
 
 func (s *ApiServer) listen() {
 	r := mux.NewRouter()
+	r.HandleFunc("/api/finders", s.FindersIndex)
 	r.HandleFunc("/api/stats", s.StatsIndex)
 	r.HandleFunc("/api/miners", s.MinersIndex)
 	r.HandleFunc("/api/blocks", s.BlocksIndex)
@@ -203,6 +204,7 @@ func (s *ApiServer) collectStats() {
 	}
 	if len(s.config.LuckWindow) > 0 {
 		stats["luck"], err = s.backend.CollectLuckStats(s.config.LuckWindow)
+		stats["luckCharts"], err = s.backend.CollectLuckCharts(s.config.LuckWindow[0])
 		if err != nil {
 			log.Printf("Failed to fetch luck stats from backend: %v", err)
 			return
@@ -211,6 +213,25 @@ func (s *ApiServer) collectStats() {
 	stats["poolCharts"], err = s.backend.GetPoolCharts(s.config.PoolChartsNum)
 	s.stats.Store(stats)
 	log.Printf("Stats collection finished %s", time.Since(start))
+}
+
+func (s *ApiServer) FindersIndex(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+
+	reply := make(map[string]interface{})
+	stats := s.getStats()
+	if stats != nil {
+		reply["now"] = util.MakeTimestamp()
+		reply["finders"] = stats["finders"]
+	}
+
+	err := json.NewEncoder(w).Encode(reply)
+	if err != nil {
+		log.Println("Error serializing API response: ", err)
+	}
 }
 
 func (s *ApiServer) StatsIndex(w http.ResponseWriter, r *http.Request) {
@@ -245,9 +266,6 @@ func (s *ApiServer) StatsIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *ApiServer) MinersIndex(w http.ResponseWriter, r *http.Request) {
-
-	// TODO: Want to get the most used server from workers, so it can be deisplayed in miners page
-
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -284,6 +302,7 @@ func (s *ApiServer) BlocksIndex(w http.ResponseWriter, r *http.Request) {
 		reply["candidates"] = stats["candidates"]
 		reply["candidatesTotal"] = stats["candidatesTotal"]
 		reply["luck"] = stats["luck"]
+		reply["luckCharts"] = stats["luckCharts"]
 	}
 
 	err := json.NewEncoder(w).Encode(reply)

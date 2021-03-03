@@ -21,7 +21,7 @@ export default Ember.Controller.extend({
             t = e.getWithDefault("model.paymentCharts"),
             a = {
                 chart: {
-                    backgroundColor: "rgba(0, 0, 0, 0.1)",
+                    backgroundColor: "rgba(255, 255, 255, 0.1)",
                     type: "column",
                     marginRight: 10,
                     height: 200,
@@ -60,15 +60,11 @@ export default Ember.Controller.extend({
                     color: "#808080"
                 }],
                 legend: {
-                    enabled: true,
-                    itemStyle:
-                      {
-                        color:"#ccc"
-                      },
+                    enabled: true
                 },
                 tooltip: {
                     formatter: function() {
-                        return "<b>" + Highcharts.dateFormat('%Y-%m-%d', new Date(this.x)) + "<b><br>Payment&nbsp;<b>" + this.y.toFixed(4) + "&nbsp;CLO</b>";
+                        return "<b>" + Highcharts.dateFormat('%Y-%m-%d', new Date(this.x)) + "<b><br>Payment&nbsp;<b>" + this.y.toFixed(8) + "&nbsp;ESN</b>";
                     },
                     useHTML: true
                 },

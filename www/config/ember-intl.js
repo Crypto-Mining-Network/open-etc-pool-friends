@@ -15,7 +15,7 @@ module.exports = function(environment) {
     * @type {Array?}
     * @default "null"
     */
-    locales:  ['en-us'],
+    locales: null,
 
     /**
     * baseLocale is used to determine if translation keys are missing from other locales.
@@ -26,7 +26,7 @@ module.exports = function(environment) {
     * @type {String?}
     * @default "null"
     */
-    baseLocale: "en-us",
+    baseLocale: null,
 
     /**
     * disablePolyfill prevents the polyfill from being bundled in the asset folder of the build

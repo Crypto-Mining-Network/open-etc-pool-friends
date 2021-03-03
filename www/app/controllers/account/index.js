@@ -12,8 +12,7 @@ export default Ember.Controller.extend({
                 t = e.getWithDefault("model.minerCharts"),
                 a = {
                     chart: {
-                        backgroundColor: "rgba(0, 0, 0, 0.1)",
-
+                        backgroundColor: "rgba(255, 255, 255, 0.1)",
                         type: "spline",
                         marginRight: 10,
                         height: 200,
@@ -33,11 +32,6 @@ export default Ember.Controller.extend({
                     },
                     xAxis: {
                         ordinal: false,
-                        labels: {
-                            style: {
-                                color: "#ccc"
-                            }
-                        },
                         type: "datetime",
                         dateTimeLabelFormats: {
                             millisecond: "%H:%M:%S",
@@ -52,15 +46,7 @@ export default Ember.Controller.extend({
                     },
                     yAxis: {
                         title: {
-                            text: "Hashrate by Account",
-                            style: {
-                                color: "#ccc"
-                            },
-                        },
-                        labels: {
-                            style: {
-                                color: "#ccc"
-                            }
+                            text: "Hashrate by Account"
                         },
                         //softMin: e.getWithDefault("model.currentHashrate") / 1000000,
                         //softMax: e.getWithDefault("model.currentHashrate") / 1000000,
@@ -68,14 +54,10 @@ export default Ember.Controller.extend({
                     plotLines: [{
                         value: 0,
                         width: 1,
-                        color: "#aaaaaa"
+                        color: "#808080"
                     }],
                     legend: {
-                        enabled: true,
-                        itemStyle:
-                          {
-                            color:"#ccc"
-                          },
+                        enabled: true
                     },
                     tooltip: {
                         formatter: function() {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,15 @@ type PaymentCharts struct {
 	Amount     int64  `json:"amount"`
 }
 
+type LuckCharts struct {
+	Timestamp  int64   `json:"x"`
+	Height     int64   `json:"height"`
+	Difficulty int64   `json:"difficulty"`
+	Shares     int64   `json:"shares"`
+	SharesDiff float64 `json:"sharesDiff"`
+	Reward     string  `json:"reward"`
+}
+
 type SumRewardData struct {
 	Interval int64  `json:"inverval"`
 	Reward   int64  `json:"reward"`
@@ -63,6 +73,7 @@ type RewardData struct {
 }
 
 type BlockData struct {
+	Login          string   `json:"login"`
 	Height         int64    `json:"height"`
 	Timestamp      int64    `json:"timestamp"`
 	Difficulty     int64    `json:"difficulty"`
@@ -101,7 +112,7 @@ func (b *BlockData) RoundKey() string {
 }
 
 func (b *BlockData) key() string {
-	return join(b.UncleHeight, b.Orphan, b.Nonce, b.serializeHash(), b.Timestamp, b.Difficulty, b.TotalShares, b.Reward)
+	return join(b.UncleHeight, b.Orphan, b.Nonce, b.serializeHash(), b.Timestamp, b.Difficulty, b.TotalShares, b.Reward, b.Login)
 }
 
 type Miner struct {
@@ -111,25 +122,18 @@ type Miner struct {
 	startedAt int64
 }
 
-// Addition from Mohannad Otaibi to report Difficulty
 type Worker struct {
 	Miner
-	TotalHR        int64  `json:"hr2"`
-	WorkerDiff     int64  `json:"difficulty"`
-	WorkerHostname string `json:"hostname"`
+	TotalHR int64 `json:"hr2"`
 }
 
 func NewRedisClient(cfg *Config, prefix string, pplns int64) *RedisClient {
-	options := redis.Options{
+	client := redis.NewClient(&redis.Options{
 		Addr:     cfg.Endpoint,
 		Password: cfg.Password,
 		DB:       cfg.Database,
 		PoolSize: cfg.PoolSize,
-	}
-	if cfg.Endpoint[0:1] == "/" {
-		options.Network = "unix"
-	}
-	client := redis.NewClient(&options)
+	})
 	return &RedisClient{client: client, prefix: prefix, pplns: pplns}
 }
 
@@ -338,7 +342,7 @@ func (r *RedisClient) checkPoWExist(height uint64, params []string) (bool, error
 	return val == 0, err
 }
 
-func (r *RedisClient) WriteShare(login, id string, params []string, diff int64, height uint64, window time.Duration, hostname string) (bool, error) {
+func (r *RedisClient) WriteShare(login, id string, params []string, diff int64, height uint64, window time.Duration) (bool, error) {
 	exist, err := r.checkPoWExist(height, params)
 	if err != nil {
 		return false, err
@@ -354,14 +358,14 @@ func (r *RedisClient) WriteShare(login, id string, params []string, diff int64, 
 	ts := ms / 1000
 
 	_, err = tx.Exec(func() error {
-		r.writeShare(tx, ms, ts, login, id, diff, window, hostname)
+		r.writeShare(tx, ms, ts, login, id, diff, window)
 		tx.HIncrBy(r.formatKey("stats"), "roundShares", diff)
 		return nil
 	})
 	return false, err
 }
 
-func (r *RedisClient) WriteBlock(login, id string, params []string, diff, roundDiff int64, height uint64, window time.Duration, hostname string) (bool, error) {
+func (r *RedisClient) WriteBlock(login, id string, params []string, diff, roundDiff int64, height uint64, window time.Duration) (bool, error) {
 	exist, err := r.checkPoWExist(height, params)
 	if err != nil {
 		return false, err
@@ -377,7 +381,7 @@ func (r *RedisClient) WriteBlock(login, id string, params []string, diff, roundD
 	ts := ms / 1000
 
 	cmds, err := tx.Exec(func() error {
-		r.writeShare(tx, ms, ts, login, id, diff, window, hostname)
+		r.writeShare(tx, ms, ts, login, id, diff, window)
 		tx.HSet(r.formatKey("stats"), "lastBlockFound", strconv.FormatInt(ts, 10))
 		tx.HDel(r.formatKey("stats"), "roundShares")
 		tx.ZIncrBy(r.formatKey("finders"), 1, login)
@@ -418,35 +422,22 @@ func (r *RedisClient) WriteBlock(login, id string, params []string, diff, roundD
 			totalShares += n
 		}
 		hashHex := strings.Join(params, ":")
-		s := join(hashHex, ts, roundDiff, totalShares)
+		s := join(hashHex, ts, roundDiff, totalShares, login)
 		cmd := r.client.ZAdd(r.formatKey("blocks", "candidates"), redis.Z{Score: float64(height), Member: s})
 		return false, cmd.Err()
 	}
 }
 
-// ID is the worker name
-func (r *RedisClient) writeShare(tx *redis.Multi, ms, ts int64, login, id string, diff int64, expire time.Duration, hostname string) {
-	/* # Note To Me:
-	Will have to write to get from redis the current value for round
-	shares and increase by 1, then include the new number to be added to redis
-	*/
-
+func (r *RedisClient) writeShare(tx *redis.Multi, ms, ts int64, login, id string, diff int64, expire time.Duration) {
 	times := int(diff / 1000000000)
-
-	// Moved get hostname to stratums
-
 	for i := 0; i < times; i++ {
 		tx.LPush(r.formatKey("lastshares"), login)
 	}
 	tx.LTrim(r.formatKey("lastshares"), 0, r.pplns)
-
 	tx.HIncrBy(r.formatKey("shares", "roundCurrent"), login, diff)
-	// For aggregation of hashrate, to store value in hashrate key
-	tx.ZAdd(r.formatKey("hashrate"), redis.Z{Score: float64(ts), Member: join(diff, login, id, ms, diff, hostname)})
-	// For separate miner's workers hashrate, to store under hashrate table under login key
-	tx.ZAdd(r.formatKey("hashrate", login), redis.Z{Score: float64(ts), Member: join(diff, id, ms, diff, hostname)})
-	// Will delete hashrates for miners that gone
-	tx.Expire(r.formatKey("hashrate", login), expire)
+	tx.ZAdd(r.formatKey("hashrate"), redis.Z{Score: float64(ts), Member: join(diff, login, id, ms)})
+	tx.ZAdd(r.formatKey("hashrate", login), redis.Z{Score: float64(ts), Member: join(diff, id, ms)})
+	tx.Expire(r.formatKey("hashrate", login), expire) // Will delete hashrates for miners that gone
 	tx.HSet(r.formatKey("miners", login), "lastShare", strconv.FormatInt(ts, 10))
 }
 
@@ -476,13 +467,6 @@ func join(args ...interface{}) string {
 			} else {
 				s[i] = "0"
 			}
-		case *big.Int:
-			n := v.(*big.Int)
-			if n != nil {
-				s[i] = n.String()
-			} else {
-				s[i] = "0"
-			}
 		case *big.Rat:
 			x := v.(*big.Rat)
 			if x != nil {
@@ -490,7 +474,13 @@ func join(args ...interface{}) string {
 			} else {
 				s[i] = "0"
 			}
-
+		case *big.Int:
+			n := v.(*big.Int)
+			if n != nil {
+				s[i] = n.String()
+			} else {
+				s[i] = "0"
+			}
 		default:
 			panic("Invalid type specified for conversion")
 		}
@@ -846,7 +836,6 @@ func (r *RedisClient) GetMinerStats(login string, maxPayments int64) (map[string
 		tx.LRange(r.formatKey("lastshares"), 0, r.pplns)
 		tx.ZRevRangeWithScores(r.formatKey("rewards", login), 0, 39)
 		tx.ZRevRangeWithScores(r.formatKey("rewards", login), 0, -1)
-
 		return nil
 	})
 
@@ -944,6 +933,7 @@ func (r *RedisClient) CollectStats(smallWindow time.Duration, maxBlocks, maxPaym
 		tx.HGet(r.formatKey("paymentsTotal"), "all")
 		tx.ZRevRangeWithScores(r.formatKey("payments", "all"), 0, maxPayments-1)
 		tx.LLen(r.formatKey("lastshares"))
+		tx.ZRevRangeWithScores(r.formatKey("finders"), 0, -1)
 		return nil
 	})
 
@@ -970,6 +960,9 @@ func (r *RedisClient) CollectStats(smallWindow time.Duration, maxBlocks, maxPaym
 	stats["payments"] = payments
 	stats["paymentsTotal"], _ = cmds[9].(*redis.StringCmd).Int64()
 
+	finders := convertFindersResults(cmds[12].(*redis.ZSliceCmd))
+	stats["finders"] = finders
+
 	totalHashrate, miners := convertMinersStats(window, cmds[1].(*redis.ZSliceCmd))
 	stats["miners"] = miners
 	stats["minersTotal"] = len(miners)
@@ -992,7 +985,6 @@ func (r *RedisClient) CollectWorkersStats(sWindow, lWindow time.Duration, login 
 		tx.ZRangeWithScores(r.formatKey("hashrate", login), 0, -1)
 		tx.ZRevRangeWithScores(r.formatKey("rewards", login), 0, 39)
 		tx.ZRevRangeWithScores(r.formatKey("rewards", login), 0, -1)
-
 		return nil
 	})
 
@@ -1035,7 +1027,6 @@ func (r *RedisClient) CollectWorkersStats(sWindow, lWindow time.Duration, login 
 		totalHashrate += worker.TotalHR
 		workers[id] = worker
 	}
-
 	stats["workers"] = workers
 	stats["workersTotal"] = len(workers)
 	stats["workersOnline"] = online
@@ -1121,6 +1112,44 @@ func (r *RedisClient) CollectLuckStats(windows []int) (map[string]interface{}, e
 	return stats, nil
 }
 
+func (r *RedisClient) CollectLuckCharts(max int) (stats []*LuckCharts, err error) {
+	var result []*LuckCharts
+	tx := r.client.Multi()
+	defer tx.Close()
+
+	cmds, err := tx.Exec(func() error {
+		tx.ZRevRangeWithScores(r.formatKey("blocks", "matured"), 0, int64(max-1))
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+	blocks := convertBlockResults(cmds[0].(*redis.ZSliceCmd))
+
+	for i, block := range blocks {
+		if i > (max - 1) {
+			break
+		}
+		lc := LuckCharts{}
+		var sharesDiff = float64(block.TotalShares) / float64(block.Difficulty)
+		lc.Timestamp = block.Timestamp
+		lc.Height = block.RoundHeight
+		lc.Difficulty = block.Difficulty
+		lc.Shares = block.TotalShares
+		lc.SharesDiff = sharesDiff
+		lc.Reward = block.RewardString
+		result = append(result, &lc)
+	}
+	sort.Sort(TimestampSorter(result))
+	return result, nil
+}
+
+type TimestampSorter []*LuckCharts
+
+func (a TimestampSorter) Len() int           { return len(a) }
+func (a TimestampSorter) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a TimestampSorter) Less(i, j int) bool { return a[i].Timestamp < a[j].Timestamp }
+
 func convertCandidateResults(raw *redis.ZSliceCmd) []*BlockData {
 	var result []*BlockData
 	for _, v := range raw.Val() {
@@ -1135,6 +1164,7 @@ func convertCandidateResults(raw *redis.ZSliceCmd) []*BlockData {
 		block.Timestamp, _ = strconv.ParseInt(fields[3], 10, 64)
 		block.Difficulty, _ = strconv.ParseInt(fields[4], 10, 64)
 		block.TotalShares, _ = strconv.ParseInt(fields[5], 10, 64)
+		block.Login = fields[6]
 		block.candidateKey = v.Member.(string)
 		result = append(result, &block)
 	}
@@ -1180,6 +1210,7 @@ func convertBlockResults(rows ...*redis.ZSliceCmd) []*BlockData {
 			block.TotalShares, _ = strconv.ParseInt(fields[6], 10, 64)
 			block.RewardString = fields[7]
 			block.ImmatureReward = fields[7]
+			block.Login = fields[8]
 			block.immatureKey = v.Member.(string)
 			result = append(result, &block)
 		}
@@ -1196,26 +1227,12 @@ func convertWorkersStats(window int64, raw *redis.ZSliceCmd) map[string]Worker {
 	for _, v := range raw.Val() {
 		parts := strings.Split(v.Member.(string), ":")
 		share, _ := strconv.ParseInt(parts[0], 10, 64)
-
-		//By Mohannad
-		var hostname string
-		if len(parts) > 3 {
-			hostname = parts[4]
-		} else {
-			hostname = "unknown"
-		}
-
 		id := parts[1]
 		score := int64(v.Score)
 		worker := workers[id]
 
 		// Add for large window
 		worker.TotalHR += share
-
-		// Addition from Mohannad Otaibi to report Difficulty
-		worker.WorkerDiff = share
-		worker.WorkerHostname = hostname
-		// End Mohannad Adjustments
 
 		// Add for small window if matches
 		if score >= now-window {
@@ -1296,7 +1313,18 @@ func convertPaymentsResults(raw *redis.ZSliceCmd) []map[string]interface{} {
 	for i := len(result) - 1; i >= 0; i-- {
 		reverse = append(reverse, result[i])
 	}
-	return reverse
+	return result
+}
+
+func convertFindersResults(raw *redis.ZSliceCmd) []map[string]interface{} {
+	var result []map[string]interface{}
+	for _, v := range raw.Val() {
+		miner := make(map[string]interface{})
+		miner["blocks"] = int64(v.Score)
+		miner["address"] = v.Member.(string)
+		result = append(result, miner)
+	}
+	return result
 }
 
 /*
@@ -1332,14 +1360,4 @@ func convertPaymentChartsResults(raw *redis.ZSliceCmd) []*PaymentCharts {
 		reverse = append(reverse, result[i])
 	}
 	return reverse
-}
-
-func (r *RedisClient) GetCurrentHashrate(login string) (int64, error) {
-	hashrate := r.client.HGet(r.formatKey("currenthashrate", login), "hashrate")
-	if hashrate.Err() == redis.Nil {
-		return 0, nil
-	} else if hashrate.Err() != nil {
-		return 0, hashrate.Err()
-	}
-	return hashrate.Int64()
 }

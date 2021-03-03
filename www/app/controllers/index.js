@@ -21,7 +21,7 @@ export default Ember.Controller.extend({
                 t = e.getWithDefault("stats.model.poolCharts"),
                 a = {
                     chart: {
-                        backgroundColor: "rgba(0, 0, 0, 0.1)",
+                        backgroundColor: "rgba(255, 255, 255, 0.1)",
                         type: "spline",
                         height: 300,
                         marginRight: 10,
@@ -36,15 +36,12 @@ export default Ember.Controller.extend({
                         }
                     },
                     title: {
-                        text: "Our pool's hashrate",
-                        style: {
-                            color: "#ccc"
-                        }
+                        text: "Our pool's hashrate"
                     },
                     xAxis: {
                         labels: {
                             style: {
-                                color: "#ccc"
+                                color: "#000"
                             }
                         },
                         ordinal: false,
@@ -54,20 +51,20 @@ export default Ember.Controller.extend({
                         title: {
                             text: "HASHRATE",
                             style: {
-                                color: "#ccc"
+                                color: "#000"
                             }
                         },
                         min: 0,
                         labels: {
                             style: {
-                                color: "#ccc"
+                                color: "#000"
                             }
                         }
                     },
                     plotLines: [{
                         value: 0,
                         width: 1,
-                        color: "#ccc"
+                        color: "#000"
                     }],
                     legend: {
                         enabled: false

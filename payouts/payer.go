@@ -5,10 +5,10 @@ import (
 	"log"
 	"math/big"
 	"os"
-	"os/exec"
+  "os/exec"
 	"strconv"
 	"time"
-	"sync"
+  "sync"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 
@@ -108,7 +108,7 @@ func (u *PayoutsProcessor) Start() {
 func (u *PayoutsProcessor) process() {
 	if u.halt {
 		log.Println("Payments suspended due to last critical error:", u.lastFail)
-		os.Exit(1)
+    os.Exit(1)
 		return
 	}
 	mustPay := 0
@@ -233,7 +233,7 @@ func (u *PayoutsProcessor) process() {
 					break
 				}
 			}
-			wg.Done()
+      			wg.Done()
 		}(txHash, login, &wg)
 
 		if waitingCount > u.config.ConcurrentTx {
