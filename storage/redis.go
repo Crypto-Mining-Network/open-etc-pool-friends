@@ -61,6 +61,7 @@ type SumRewardData struct {
 	Reward   int64  `json:"reward"`
 	Name     string `json:"name"`
 	Offset   int64  `json:"offset"`
+	Blocks   int64  `json:"blocks"`
 }
 
 type RewardData struct {
@@ -120,11 +121,20 @@ type Miner struct {
 	HR        int64 `json:"hr"`
 	Offline   bool  `json:"offline"`
 	startedAt int64
+	Blocks    int64 `json:"blocks"`
 }
 
 type Worker struct {
 	Miner
-	TotalHR int64 `json:"hr2"`
+	TotalHR         int64   `json:"hr2"`
+	ValidShares     int64   `json:"valid"`
+	StaleShares     int64   `json:"stale"`
+	InvalidShares   int64   `json:"invalid"`
+	ValidPercent    float64 `json:"v_per"`
+	StalePercent    float64 `json:"s_per"`
+	InvalidPercent  float64 `json:"i_per"`
+	WorkerStatus    int64   `json:"w_stat"`
+	WorkerStatushas int64   `json:"w_stat_s"`
 }
 
 func NewRedisClient(cfg *Config, prefix string, pplns int64) *RedisClient {
@@ -391,6 +401,7 @@ func (r *RedisClient) WriteBlock(login, id string, params []string, diff, roundD
 		tx.LRange(r.formatKey("lastshares"), 0, r.pplns)
 		return nil
 	})
+	r.WriteBlocksFound(ms, ts, login, id, params[0], diff)
 	if err != nil {
 		return false, err
 	} else {
@@ -439,6 +450,10 @@ func (r *RedisClient) writeShare(tx *redis.Multi, ms, ts int64, login, id string
 	tx.ZAdd(r.formatKey("hashrate", login), redis.Z{Score: float64(ts), Member: join(diff, id, ms)})
 	tx.Expire(r.formatKey("hashrate", login), expire) // Will delete hashrates for miners that gone
 	tx.HSet(r.formatKey("miners", login), "lastShare", strconv.FormatInt(ts, 10))
+}
+
+func (r *RedisClient) WriteBlocksFound(ms, ts int64, login, id, share string, diff int64) {
+	r.client.ZAdd(r.formatKey("worker", "blocks", login), redis.Z{Score: float64(ts), Member: join(diff, share, id, ms)})
 }
 
 func (r *RedisClient) formatKey(args ...interface{}) string {
@@ -985,6 +1000,7 @@ func (r *RedisClient) CollectWorkersStats(sWindow, lWindow time.Duration, login 
 		tx.ZRangeWithScores(r.formatKey("hashrate", login), 0, -1)
 		tx.ZRevRangeWithScores(r.formatKey("rewards", login), 0, 39)
 		tx.ZRevRangeWithScores(r.formatKey("rewards", login), 0, -1)
+		tx.ZRangeWithScores(r.formatKey("worker", "blocks", login), 0, -1)
 		return nil
 	})
 
@@ -996,7 +1012,7 @@ func (r *RedisClient) CollectWorkersStats(sWindow, lWindow time.Duration, login 
 	currentHashrate := int64(0)
 	online := int64(0)
 	offline := int64(0)
-	workers := convertWorkersStats(smallWindow, cmds[1].(*redis.ZSliceCmd))
+	workers := convertWorkersStats(smallWindow, cmds[1].(*redis.ZSliceCmd), cmds[4].(*redis.ZSliceCmd), login, r)
 
 	for id, worker := range workers {
 		timeOnline := now - worker.startedAt
@@ -1023,10 +1039,83 @@ func (r *RedisClient) CollectWorkersStats(sWindow, lWindow time.Duration, login 
 			online++
 		}
 
+		blocks := cmds[4].(*redis.ZSliceCmd).Val()
+
+		for _, val := range blocks {
+			parts := strings.Split(val.Member.(string), ":")
+			rig := parts[2]
+			if id == rig {
+				str := fmt.Sprint(val.Member.(string))
+				if worker.LastBeat < (now - largeWindow) {
+					tx.ZRem(r.formatKey("worker", "blocks", login), str)
+				}
+			}
+		}
+
 		currentHashrate += worker.HR
 		totalHashrate += worker.TotalHR
+		valid_share, stale_share, invalid_share, _ := r.getSharesStatus(login, id)
+		worker.ValidShares = int64(5)
+		worker.StaleShares = int64(5)
+		worker.InvalidShares = int64(5)
+		worker.ValidShares = valid_share
+		worker.StaleShares = stale_share
+		worker.InvalidShares = invalid_share
+		//test percentage
+		worker.ValidPercent = float64(0)
+		worker.StalePercent = float64(0)
+		worker.InvalidPercent = float64(0)
+		tot_share := int64(0)
+		tot_share += valid_share
+		tot_share += stale_share
+		tot_share += invalid_share
+		if tot_share > 0 {
+			d := float64(100)
+			//tot_share += ////error
+			cost_per := float64(tot_share) / d
+			v_per := float64(valid_share) / cost_per
+			worker.ValidPercent = toFixed(v_per, 1)
+			s_per := float64(stale_share) / cost_per
+			worker.StalePercent = toFixed(s_per, 1)
+			i_per := float64(invalid_share) / cost_per
+			worker.InvalidPercent = toFixed(i_per, 1)
+		} else {
+			worker.ValidPercent = toFixed(0, 1)
+			worker.StalePercent = toFixed(0, 1)
+			worker.InvalidPercent = toFixed(0, 1)
+		}
+		w_stat := int64(0) //test worker large hashrate indicator
+		if worker.HR >= worker.TotalHR {
+			w_stat = 1
+			worker.WorkerStatus = w_stat
+		} else if worker.HR < worker.TotalHR {
+			w_stat = 0
+			worker.WorkerStatus = w_stat
+		}
+		///test small hr
+		tot_w := r.client.HGet(r.formatKey("minerShare", login, id), "hashrate")
+
+		if tot_w.Err() == redis.Nil {
+			tx.HSet(r.formatKey("minerShare", login, id), "hashrate", strconv.FormatInt(0, 10))
+			//return nil, nil
+		} else if tot_w.Err() != nil {
+			tx.HSet(r.formatKey("minerShare", login, id), "hashrate", strconv.FormatInt(0, 10))
+			//return nil, tot_w.Err()
+		}
+
+		last_hr, _ := tot_w.Int64()
+		w_stat_s := int64(0) //test worker hashrate indicator
+		if worker.HR > last_hr {
+			w_stat_s = 1
+			worker.WorkerStatushas = w_stat_s
+		} else if worker.HR <= last_hr {
+			w_stat_s = 0
+			worker.WorkerStatushas = w_stat_s
+		}
+		tx.HSet(r.formatKey("minerShare", login, id), "hashrate", strconv.FormatInt(worker.HR, 10))
 		workers[id] = worker
 	}
+
 	stats["workers"] = workers
 	stats["workersTotal"] = len(workers)
 	stats["workersOnline"] = online
@@ -1048,14 +1137,25 @@ func (r *RedisClient) CollectWorkersStats(sWindow, lWindow time.Duration, login 
 
 		for _, dore := range dorew {
 			dore.Reward += 0
+			dore.Blocks += 0
 			if reward.Timestamp > now-dore.Interval {
 				dore.Reward += reward.Reward
+				dore.Blocks++
 			}
 		}
 	}
 	stats["sumrewards"] = dorew
 	stats["24hreward"] = dorew[2].Reward
 	return stats, nil
+}
+
+func round(num float64) int {
+	return int(num + math.Copysign(0.5, num))
+}
+
+func toFixed(num float64, precision int) float64 {
+	output := math.Pow(10, float64(precision))
+	return float64(round(num*output)) / output
 }
 
 func (r *RedisClient) CollectLuckStats(windows []int) (map[string]interface{}, error) {
@@ -1220,9 +1320,17 @@ func convertBlockResults(rows ...*redis.ZSliceCmd) []*BlockData {
 
 // Build per login workers's total shares map {'rig-1': 12345, 'rig-2': 6789, ...}
 // TS => diff, id, ms
-func convertWorkersStats(window int64, raw *redis.ZSliceCmd) map[string]Worker {
+func convertWorkersStats(window int64, raw *redis.ZSliceCmd, blocks *redis.ZSliceCmd, login string, r *RedisClient) map[string]Worker {
 	now := util.MakeTimestamp() / 1000
 	workers := make(map[string]Worker)
+
+	for _, v := range blocks.Val() {
+		parts := strings.Split(v.Member.(string), ":")
+		id := parts[2]
+		worker := workers[id]
+		worker.Blocks++
+		workers[id] = worker
+	}
 
 	for _, v := range raw.Val() {
 		parts := strings.Split(v.Member.(string), ":")
@@ -1233,6 +1341,14 @@ func convertWorkersStats(window int64, raw *redis.ZSliceCmd) map[string]Worker {
 
 		// Add for large window
 		worker.TotalHR += share
+		worker.ValidShares = int64(4)
+		worker.ValidPercent = float64(0)
+		worker.StalePercent = float64(0)
+		worker.InvalidPercent = float64(0)
+		worker.WorkerStatus = int64(0)
+		worker.WorkerStatushas = int64(0)
+		//worker.StatleShares = int64(4)
+		//worker.InvalidShares = int64(4)
 
 		// Add for small window if matches
 		if score >= now-window {
@@ -1360,4 +1476,110 @@ func convertPaymentChartsResults(raw *redis.ZSliceCmd) []*PaymentCharts {
 		reverse = append(reverse, result[i])
 	}
 	return reverse
+}
+
+func (r *RedisClient) GetCurrentHashrate(login string) (int64, error) {
+	hashrate := r.client.HGet(r.formatKey("currenthashrate", login), "hashrate")
+	if hashrate.Err() == redis.Nil {
+		return 0, nil
+	} else if hashrate.Err() != nil {
+		return 0, hashrate.Err()
+	}
+	return hashrate.Int64()
+}
+
+// Need a function to delete on round end or whatever, and another function to get.
+func (r *RedisClient) ResetWorkerShareStatus() {
+	tx := r.client.Multi()
+	defer tx.Close()
+
+	tx.Exec(func() error {
+		tx.HDel(r.formatKey("minerShare"))
+		return nil
+	})
+
+	// THis should do it ay ?
+	// fuck it
+}
+
+// Don't know if this will work, returning three values, but let's see
+
+func (r *RedisClient) getSharesStatus(login string, id string) (int64, int64, int64, error) {
+	valid_shares := r.client.HGet(r.formatKey("minerShare", login, id), "valid")
+	stale_shares := r.client.HGet(r.formatKey("minerShare", login, id), "stale")
+	invalid_shares := r.client.HGet(r.formatKey("minerShare", login, id), "invalid")
+
+	if valid_shares.Err() == redis.Nil || stale_shares.Err() == redis.Nil || invalid_shares.Err() == redis.Nil {
+		return 0, 0, 0, nil
+	} else if valid_shares.Err() != nil || stale_shares.Err() != nil || invalid_shares.Err() != nil {
+		return 0, 0, 0, valid_shares.Err()
+	}
+
+	v_c, _ := valid_shares.Int64()
+	s_c, _ := stale_shares.Int64()
+	i_c, _ := invalid_shares.Int64()
+	return v_c, s_c, i_c, nil
+
+}
+
+//lets try to fuck without understanding and see if it works
+func (r *RedisClient) WriteWorkerShareStatus(login string, id string, valid bool, stale bool, invalid bool) {
+
+	valid_int := 0
+	stale_int := 0
+	invalid_int := 0
+	if valid {
+		valid_int = 1
+	}
+	if stale {
+		stale_int = 1
+	}
+	if invalid {
+		invalid_int = 1
+	}
+
+	// var after = time.Now().AddDate(0, 0, -1).Unix()
+	//  var now = time.Now().Unix()
+	// if(now >= after){
+	//   tx.HDel(r.formatKey("minerShare", login, id))
+	// }
+	t := time.Now().Local()
+	if t.Format("15:04:05") >= "23:59:00" {
+		tx := r.client.Multi()
+		defer tx.Close()
+		tx.Exec(func() error {
+			//tx.Del(r.formatKey("minerShare", login, id))
+			tx.HSet(r.formatKey("minerShare", login, id), "valid", strconv.FormatInt(0, 10))
+			tx.HSet(r.formatKey("minerShare", login, id), "stale", strconv.FormatInt(0, 10))
+			tx.HSet(r.formatKey("minerShare", login, id), "invalid", strconv.FormatInt(0, 10))
+			return nil
+		})
+	} else {
+		// So, we need to initiate the tx object
+		tx := r.client.Multi()
+		defer tx.Close()
+
+		tx.Exec(func() error {
+			// OK, good, no need to read reset and add if i use Hset and HGet shit
+			tx.HIncrBy(r.formatKey("minerShare", login, id), "valid", int64(valid_int))
+			tx.HIncrBy(r.formatKey("minerShare", login, id), "stale", int64(stale_int))
+			tx.HIncrBy(r.formatKey("minerShare", login, id), "invalid", int64(invalid_int))
+			tx.HIncrBy(r.formatKey("chartsNum", "share", login), "valid", int64(valid_int))
+			tx.HIncrBy(r.formatKey("chartsNum", "share", login), "stale", int64(stale_int)) // Would that work?
+
+			return nil
+		})
+	} //end else
+}
+
+func (r *RedisClient) NumberStratumWorker(count int) {
+	tx := r.client.Multi()
+	defer tx.Close()
+
+	tx.Exec(func() error {
+		tx.Del(r.formatKey("WorkersTot"))
+		tx.HIncrBy(r.formatKey("WorkersTot"), "workers", int64(count))
+		//tx.HSet(r.formatKey("WorkersTotal"), "workers", int64(count))
+		return nil
+	})
 }
