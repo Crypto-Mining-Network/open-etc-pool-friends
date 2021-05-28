@@ -1,9 +1,9 @@
-## Open Source Ethereum Classic Mining Pool
+## Open Source Ethereum Classic Mining Pool PPLNS
 
 Donations
 ETC: 0xd92fa5a9732a0aec36dc8d5a6a1305dc2d3e09e6
 
-### WARNING: This code is currently configured for the Ethereum Classic main network
+### WARNING: This code is currently configured for the ETHASH main network
 
 ### Features
 
@@ -34,9 +34,9 @@ First install  [core-geth](https://github.com/etclabscore/core-geth/releases).
 
 Clone & compile:
 
-    git config --global http.https://gopkg.in.followRedirects true
+    
     git clone https://github.com/yuriy0803/open-etc-pool-friends.git
-    cd open-etc-pool
+    cd open-etc-pool-friends
     make
 
 Install redis-server.

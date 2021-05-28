@@ -3,8 +3,8 @@ package payouts
 import (
 	"fmt"
 	"log"
-  "os"
 	"math/big"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -270,7 +270,7 @@ func handleUncle(height int64, uncle *rpc.GetBlockReply, candidate *storage.Bloc
 func (u *BlockUnlocker) unlockPendingBlocks() {
 	if u.halt {
 		log.Println("Unlocking suspended due to last critical error:", u.lastFail)
-    os.Exit(1)
+		os.Exit(1)
 		return
 	}
 
@@ -356,7 +356,7 @@ func (u *BlockUnlocker) unlockPendingBlocks() {
 			entries = append(entries, fmt.Sprintf("\tREWARD %v: %v: %v Shannon", block.RoundKey(), login, reward))
 			per := new(big.Rat)
 			if val, ok := percents[login]; ok {
-					per = val
+				per = val
 			}
 			u.backend.WriteReward(login, reward, per, true, block)
 		}
@@ -505,9 +505,9 @@ func (u *BlockUnlocker) calculateRewards(block *storage.BlockData) (*big.Rat, *b
 	return revenue, minersProfit, poolProfit, rewards, percents, nil
 }
 
-func calculateRewardsForShares(shares map[string]int64, total int64, reward *big.Rat)(map[string]int64, map[string]*big.Rat) {
+func calculateRewardsForShares(shares map[string]int64, total int64, reward *big.Rat) (map[string]int64, map[string]*big.Rat) {
 	rewards := make(map[string]int64)
-  percents := make(map[string]*big.Rat)
+	percents := make(map[string]*big.Rat)
 
 	for login, n := range shares {
 		percents[login] = big.NewRat(n, total)

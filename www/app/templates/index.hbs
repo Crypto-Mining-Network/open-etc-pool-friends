@@ -28,6 +28,7 @@
         <div><i class="fa fa-tachometer"></i> Network Hash Rate: <span>{{format-hashrate stats.hashrate}}</span></div>
         <div><i class="fa fa-bars"></i> Blockchain Height: <span>{{format-number stats.height}}</span></div>
         <div><i class="fa fa-clock-o"></i> Current Round Variance: <span>{{format-number stats.roundVariance style='percent'}}</span></div>
+        <div><i class="fa fa-credit-card-alt fa-fw"></i> Current price: <span>$ {{model.exchangedata.current_price}}</span></div>
       </div>
     </div>
   </div>
@@ -46,9 +47,12 @@
     </div>
   </div>
   <div>
+<div class="container">
+  {{high-charts mode=mode chartOptions=chartOptions content=chartData}}
+</div>
   <div class="container">
-  {{high-charts mode=chartMode chartOptions=chartOptions content=chartData}}
-  </div>
+  {{high-charts mode=mode chartOptions=chartDiff content=chartData}}
+</div>
     {{#if (equals config.Network 'mordor')}}
       <div class="bs-callout bs-callout-danger">
         <h4>

@@ -1,9 +1,10 @@
 {
-	"threads": 2,
+	"threads": 4,
 	"coin": "etc",
 	"name": "main",
-        "pplns": 9000,
+    "pplns": 9000,
 	"network": "classic",
+	"coin-name":"etc",
 
 	"proxy": {
 		"enabled": true,
@@ -17,6 +18,7 @@
 		"hashrateExpiration": "3h",
 
 		"healthCheck": true,
+		"debug": true,
 		"maxFails": 100,
 
 		"stratum": {
@@ -62,14 +64,18 @@
 		"poolCharts":"*/20 * * * *",
 		"poolChartsNum":74,
 		"minerCharts":"*/20 * * * *",
-		"minerChartsNum":74
+    "minerChartsNum":74,
+    "netCharts":"*/20 * * * *",
+    "netChartsNum":74,
+    "shareCharts":"*/20 * * * *",
+    "shareChartsNum":74
 	},
 
 	"upstreamCheckInterval": "5s",
 	"upstream": [
 		{
 			"name": "main",
-			"url": "http://192.168.178.26:8545",
+			"url": "http://192.168.178.30:8545",
 			"timeout": "10s"
 		},
 		{
@@ -85,6 +91,13 @@
 		"database": 0,
 		"password": ""
 	},
+  
+	"exchange": {
+		   "enabled": true,
+		   "url": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=ethereum-classic",
+		   "timeout": "50s",
+		   "refreshInterval": "900s"
+    },
 
 	"unlocker": {
 		"enabled": true,
@@ -93,8 +106,8 @@
 		"depth": 120,
 		"immatureDepth": 20,
 		"keepTxFees": false,
-		"interval": "1m",
-		"daemon": "http://192.168.178.26:8545",
+		"interval": "10m",
+		"daemon": "http://192.168.178.30:8545",
 		"timeout": "10s"
 	},
 
@@ -104,7 +117,7 @@
 		"interval": "20m",
 		"daemon": "http://192.168.178.26:8545",
 		"timeout": "10s",
-		"address": "0xf8d10632dedf8cb9033b1438187a618d08734cc8",
+		"address": "0x9dd0226060b6d9644066029f4993CB2A40cF775D",
 		"gas": "21000",
 		"gasPrice": "50000000000",
 		"autoGas": true,
